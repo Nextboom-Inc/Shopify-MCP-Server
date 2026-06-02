@@ -13,6 +13,8 @@ A comprehensive [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 
 - **Inventory** — locations, get/adjust/set inventory levels
 - **Metaobjects** — definitions (list/create) and entries (list/create/update/delete) via GraphQL
 - **Metafields** — get/set on products and variants
+- **Metafield definitions** — list, create, update, and delete definitions for products, variants, pages, collections, and other owner types
+- **Pages** — list, get, create, update, delete pages, including template suffix assignment
 - **Discounts** — price rules and discount codes (list, create, delete)
 - **Publishing** — list sales channels, publish/unpublish products to channels
 - **Themes** — list, create, update, delete themes; list, read, write, delete theme files (assets)
@@ -92,6 +94,8 @@ read_metaobject_definitions,write_metaobject_definitions,
 read_publications,write_publications,
 read_themes,write_themes,
 read_fulfillments,write_fulfillments,
+read_content,write_content,
+read_online_store_pages,write_online_store_pages,
 read_online_store_navigation,write_online_store_navigation
 ```
 
@@ -115,11 +119,13 @@ Scope groups by tool area:
 | Discount codes | `read_discounts`, `write_discounts` |
 | Metaobject entries | `read_metaobjects`, `write_metaobjects` |
 | Metaobject definitions | `read_metaobject_definitions`, `write_metaobject_definitions` |
+| Metafield definitions | Owner resource scopes, for example `read_products`, `write_products` for product definitions and `read_content`, `write_content`, `read_online_store_pages`, `write_online_store_pages` for page definitions |
+| Pages and page templates | `read_content`, `write_content`, `read_online_store_pages`, `write_online_store_pages` |
 | Themes and theme assets | `read_themes`, `write_themes` |
 
-The server does not currently implement Shopify content/page/blog tools, so `read_content` and `write_content` are not required for the current tool set.
+The server does not currently implement blog or article tools. Page tools use Admin GraphQL's Page API and support `templateSuffix` for assigning page templates.
 
-## Available Tools (76)
+## Available Tools (85)
 
 ### Shop
 | Tool | Description |
@@ -234,6 +240,23 @@ The server does not currently implement Shopify content/page/blog tools, so `rea
 | `create_metaobject` | Create a new metaobject entry |
 | `update_metaobject` | Update metaobject fields |
 | `delete_metaobject` | Delete a metaobject entry |
+
+### Metafield Definitions (GraphQL)
+| Tool | Description |
+|------|-------------|
+| `list_metafield_definitions` | List metafield definitions for an owner type |
+| `create_metafield_definition` | Create a metafield definition |
+| `update_metafield_definition` | Update a metafield definition |
+| `delete_metafield_definition` | Delete a metafield definition |
+
+### Pages (GraphQL)
+| Tool | Description |
+|------|-------------|
+| `list_pages` | List online store pages |
+| `get_page` | Get a page by ID, including metafields |
+| `create_page` | Create a page, including optional template suffix |
+| `update_page` | Update a page, including template suffix |
+| `delete_page` | Delete a page |
 
 ### Themes
 | Tool | Description |

@@ -1405,6 +1405,145 @@ const tools = [
     },
   },
   {
+    name: 'list_metafield_definitions',
+    description: 'List metafield definitions for an owner type',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner_type: {
+          type: 'string',
+          description: 'Metafield owner type, e.g. PRODUCT, PRODUCTVARIANT, PAGE, COLLECTION',
+        },
+        limit: { type: 'number', description: 'Max results' },
+        query: {
+          type: 'string',
+          description: 'Optional Shopify search query, e.g. "namespace:custom"',
+        },
+      },
+      required: ['owner_type'],
+    },
+  },
+  {
+    name: 'create_metafield_definition',
+    description: 'Create a metafield definition for an owner type',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        definition: {
+          type: 'object',
+          description: 'MetafieldDefinitionInput object',
+        },
+      },
+      required: ['definition'],
+    },
+  },
+  {
+    name: 'update_metafield_definition',
+    description: 'Update a metafield definition',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        definition: {
+          type: 'object',
+          description: 'MetafieldDefinitionUpdateInput object',
+        },
+      },
+      required: ['definition'],
+    },
+  },
+  {
+    name: 'delete_metafield_definition',
+    description: 'Delete a metafield definition',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        definition_id: {
+          type: 'string',
+          description: 'Metafield definition ID, numeric or gid://shopify/MetafieldDefinition/...',
+        },
+        delete_all_associated_metafields: {
+          type: 'boolean',
+          description: 'Delete all metafields that use this definition',
+        },
+      },
+      required: ['definition_id'],
+    },
+  },
+  {
+    name: 'list_pages',
+    description: 'List online store pages',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max results' },
+        query: {
+          type: 'string',
+          description: 'Optional Shopify search query, e.g. "title:About"',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_page',
+    description: 'Get an online store page by ID',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: {
+          type: 'string',
+          description: 'Page ID, numeric or gid://shopify/Page/...',
+        },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'create_page',
+    description: 'Create an online store page, including optional template suffix',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page: {
+          type: 'object',
+          description: 'PageCreateInput object. Supports title, handle, body, isPublished, templateSuffix.',
+        },
+      },
+      required: ['page'],
+    },
+  },
+  {
+    name: 'update_page',
+    description: 'Update an online store page, including template suffix',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: {
+          type: 'string',
+          description: 'Page ID, numeric or gid://shopify/Page/...',
+        },
+        page: {
+          type: 'object',
+          description: 'PageUpdateInput object. Supports title, handle, body, isPublished, templateSuffix.',
+        },
+      },
+      required: ['page_id', 'page'],
+    },
+  },
+  {
+    name: 'delete_page',
+    description: 'Delete an online store page',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_id: {
+          type: 'string',
+          description: 'Page ID, numeric or gid://shopify/Page/...',
+        },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
     name: 'list_product_taxonomy',
     description: 'List all product categories in Shopify\'s standard taxonomy',
     inputSchema: {
@@ -2898,6 +3037,296 @@ const handlers = {
         );
       }
       return ok({ deletedId: result.metaobjectDelete.deletedId });
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_metafield_definitions: async (args) => {
+    try {
+      const query = `
+        query ListMetafieldDefinitions($ownerType: MetafieldOwnerType!, $first: Int!, $query: String) {
+          metafieldDefinitions(ownerType: $ownerType, first: $first, query: $query) {
+            nodes {
+              id
+              name
+              namespace
+              key
+              ownerType
+              type {
+                name
+              }
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query, {
+        ownerType: args.owner_type,
+        first: args.limit || 50,
+        query: args.query || null,
+      });
+      return ok(result.metafieldDefinitions.nodes || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_metafield_definition: async (args) => {
+    try {
+      const mutation = `
+        mutation CreateMetafieldDefinition($definition: MetafieldDefinitionInput!) {
+          metafieldDefinitionCreate(definition: $definition) {
+            createdDefinition {
+              id
+              name
+              namespace
+              key
+              ownerType
+              type {
+                name
+              }
+            }
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        definition: args.definition,
+      });
+      if (result.metafieldDefinitionCreate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.metafieldDefinitionCreate.userErrors)}`
+        );
+      }
+      return ok(result.metafieldDefinitionCreate.createdDefinition);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  update_metafield_definition: async (args) => {
+    try {
+      const mutation = `
+        mutation UpdateMetafieldDefinition($definition: MetafieldDefinitionUpdateInput!) {
+          metafieldDefinitionUpdate(definition: $definition) {
+            updatedDefinition {
+              id
+              name
+              namespace
+              key
+              ownerType
+              type {
+                name
+              }
+            }
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        definition: args.definition,
+      });
+      if (result.metafieldDefinitionUpdate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.metafieldDefinitionUpdate.userErrors)}`
+        );
+      }
+      return ok(result.metafieldDefinitionUpdate.updatedDefinition);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_metafield_definition: async (args) => {
+    try {
+      const mutation = `
+        mutation DeleteMetafieldDefinition($id: ID!, $deleteAllAssociatedMetafields: Boolean!) {
+          metafieldDefinitionDelete(id: $id, deleteAllAssociatedMetafields: $deleteAllAssociatedMetafields) {
+            deletedDefinitionId
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        id: toGid('MetafieldDefinition', args.definition_id),
+        deleteAllAssociatedMetafields: args.delete_all_associated_metafields || false,
+      });
+      if (result.metafieldDefinitionDelete?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.metafieldDefinitionDelete.userErrors)}`
+        );
+      }
+      return ok({
+        deletedDefinitionId:
+          result.metafieldDefinitionDelete.deletedDefinitionId,
+      });
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_pages: async (args) => {
+    try {
+      const query = `
+        query ListPages($first: Int!, $query: String) {
+          pages(first: $first, query: $query) {
+            nodes {
+              id
+              title
+              handle
+              body
+              isPublished
+              templateSuffix
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query, {
+        first: args.limit || 50,
+        query: args.query || null,
+      });
+      return ok(result.pages.nodes || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_page: async (args) => {
+    try {
+      const query = `
+        query GetPage($id: ID!) {
+          page(id: $id) {
+            id
+            title
+            handle
+            body
+            isPublished
+            templateSuffix
+            metafields(first: 50) {
+              nodes {
+                id
+                namespace
+                key
+                type
+                value
+              }
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query, {
+        id: toGid('Page', args.page_id),
+      });
+      return ok(result.page);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_page: async (args) => {
+    try {
+      const mutation = `
+        mutation CreatePage($page: PageCreateInput!) {
+          pageCreate(page: $page) {
+            page {
+              id
+              title
+              handle
+              isPublished
+              templateSuffix
+            }
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        page: args.page,
+      });
+      if (result.pageCreate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.pageCreate.userErrors)}`
+        );
+      }
+      return ok(result.pageCreate.page);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  update_page: async (args) => {
+    try {
+      const mutation = `
+        mutation UpdatePage($id: ID!, $page: PageUpdateInput!) {
+          pageUpdate(id: $id, page: $page) {
+            page {
+              id
+              title
+              handle
+              isPublished
+              templateSuffix
+            }
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        id: toGid('Page', args.page_id),
+        page: args.page,
+      });
+      if (result.pageUpdate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.pageUpdate.userErrors)}`
+        );
+      }
+      return ok(result.pageUpdate.page);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_page: async (args) => {
+    try {
+      const mutation = `
+        mutation DeletePage($id: ID!) {
+          pageDelete(id: $id) {
+            deletedPageId
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        id: toGid('Page', args.page_id),
+      });
+      if (result.pageDelete?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.pageDelete.userErrors)}`
+        );
+      }
+      return ok({ deletedPageId: result.pageDelete.deletedPageId });
     } catch (error) {
       return err(error.message);
     }
