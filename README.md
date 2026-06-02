@@ -69,9 +69,11 @@ Fallback: if `SHOPIFY_ACCESS_TOKEN` is set, the server will use it directly.
 
 ### Getting app credentials and scopes
 
-1. Go to your Shopify Admin → **Settings → Apps and sales channels → Develop apps**
-2. Create a private/custom app and grant it the Admin API scopes you need
-3. Copy the app's client ID and client secret
+1. Go to the [Shopify Dev Dashboard](https://dev.shopify.com/dashboard)
+2. Create or select an app for the store
+3. In the app's API access settings, grant the Admin API scopes you need
+4. Install or reauthorize the app on the target Shopify store after changing scopes
+5. Copy the app's client ID and client secret into your MCP server environment
 
 ### Admin API scopes
 
