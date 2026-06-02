@@ -1917,11 +1917,23 @@ const handlers = {
 
   add_product_to_collection: async (args) => {
     try {
-      const result = await shopifyREST(
-        `/custom_collections/${args.collection_id}/products/${args.product_id}.json`,
-        { method: 'PUT', body: JSON.stringify({}) }
+      const existing = await shopifyREST(
+        `/collects.json?collection_id=${encodeURIComponent(args.collection_id)}&product_id=${encodeURIComponent(args.product_id)}&limit=1`
       );
-      return ok(result);
+      if (existing.collects?.length) {
+        return ok(existing.collects[0]);
+      }
+
+      const result = await shopifyREST('/collects.json', {
+        method: 'POST',
+        body: JSON.stringify({
+          collect: {
+            collection_id: Number(args.collection_id),
+            product_id: Number(args.product_id),
+          },
+        }),
+      });
+      return ok(result.collect);
     } catch (error) {
       return err(error.message);
     }
@@ -1929,9 +1941,9 @@ const handlers = {
 
   list_collection_products: async (args) => {
     try {
-      const data = await shopifyREST(
-        `/custom_collections/${args.collection_id}/products.json${args.limit ? `?limit=${args.limit}` : ''}`
-      );
+      const params = [`collection_id=${encodeURIComponent(args.collection_id)}`];
+      if (args.limit) params.push(`limit=${args.limit}`);
+      const data = await shopifyREST(`/products.json?${params.join('&')}`);
       return ok(data.products || []);
     } catch (error) {
       return err(error.message);
