@@ -12,10 +12,15 @@ import {
 // ─── Config ────────────────────────────────────────────────────────────────
 const SHOPIFY_STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
+const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID;
+const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 
-if (!SHOPIFY_STORE_DOMAIN || !SHOPIFY_ACCESS_TOKEN) {
+if (
+  !SHOPIFY_STORE_DOMAIN ||
+  (!SHOPIFY_ACCESS_TOKEN && (!SHOPIFY_CLIENT_ID || !SHOPIFY_CLIENT_SECRET))
+) {
   console.error(
-    'ERROR: Missing required environment variables: SHOPIFY_STORE_DOMAIN, SHOPIFY_ACCESS_TOKEN'
+    'ERROR: Missing required environment variables. Required: SHOPIFY_STORE_DOMAIN plus either SHOPIFY_ACCESS_TOKEN or SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET'
   );
   process.exit(1);
 }
@@ -23,15 +28,58 @@ if (!SHOPIFY_STORE_DOMAIN || !SHOPIFY_ACCESS_TOKEN) {
 const API_VERSION = '2026-01';
 const BASE_URL = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/${API_VERSION}`;
 const GRAPHQL_URL = `${BASE_URL}/graphql.json`;
+const OAUTH_TOKEN_URL = `https://${SHOPIFY_STORE_DOMAIN}/admin/oauth/access_token`;
+
+let tokenCache = {
+  accessToken: SHOPIFY_ACCESS_TOKEN || null,
+  expiresAtMs: SHOPIFY_ACCESS_TOKEN ? Number.MAX_SAFE_INTEGER : 0,
+};
+
+async function getAccessToken() {
+  if (tokenCache.accessToken && Date.now() < tokenCache.expiresAtMs - 30000) {
+    return tokenCache.accessToken;
+  }
+
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: SHOPIFY_CLIENT_ID,
+    client_secret: SHOPIFY_CLIENT_SECRET,
+  });
+
+  const res = await fetch(OAUTH_TOKEN_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  });
+
+  if (!res.ok) {
+    const responseBody = await res.text();
+    throw new Error(`Shopify OAuth ${res.status}: ${responseBody}`);
+  }
+
+  const json = await res.json();
+  if (!json.access_token) {
+    throw new Error('Shopify OAuth response missing access_token');
+  }
+
+  tokenCache = {
+    accessToken: json.access_token,
+    expiresAtMs: Date.now() + (Number(json.expires_in || 3600) * 1000),
+  };
+  return tokenCache.accessToken;
+}
 
 // ─── HTTP Helpers ───────────────────────────────────────────────────────────
 async function shopifyREST(path, options = {}) {
+  const accessToken = await getAccessToken();
   const url = `${BASE_URL}${path}`;
   const res = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+      'X-Shopify-Access-Token': accessToken,
       ...(options.headers || {}),
     },
   });
@@ -44,11 +92,12 @@ async function shopifyREST(path, options = {}) {
 }
 
 async function shopifyGQL(query, variables = {}) {
+  const accessToken = await getAccessToken();
   const res = await fetch(GRAPHQL_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+      'X-Shopify-Access-Token': accessToken,
     },
     body: JSON.stringify({ query, variables }),
   });
@@ -2380,7 +2429,7 @@ const handlers = {
                 name
                 type
                 description
-                fields(first: 25) {
+                fieldDefinitions(first: 25) {
                   edges {
                     node {
                       name
@@ -2408,14 +2457,14 @@ const handlers = {
   create_metaobject_definition: async (args) => {
     try {
       const mutation = `
-        mutation CreateMetaobjectDefinition($definition: MetaobjectDefinitionInput!) {
+        mutation CreateMetaobjectDefinition($definition: MetaobjectDefinitionCreateInput!) {
           metaobjectDefinitionCreate(definition: $definition) {
             metaobjectDefinition {
               id
               name
               type
               description
-              fields(first: 25) {
+              fieldDefinitions(first: 25) {
                 edges {
                   node {
                     name
@@ -2439,7 +2488,7 @@ const handlers = {
           name: args.name,
           type: args.type,
           description: args.description,
-          fields: args.fields,
+          fieldDefinitions: args.fields,
         },
       };
       const result = await shopifyGQL(mutation, variables);

@@ -25,10 +25,11 @@ A comprehensive [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 
   "mcpServers": {
     "shopify": {
       "command": "npx",
-      "args": ["-y", "github:slackermafia/Shopify-MCP-Server"],
+      "args": ["-y", "github:Nextboom-Inc/Shopify-MCP-Server"],
       "env": {
         "SHOPIFY_STORE_DOMAIN": "your-store.myshopify.com",
-        "SHOPIFY_ACCESS_TOKEN": "shpat_xxxxxxxxxxxx"
+        "SHOPIFY_CLIENT_ID": "your-app-client-id",
+        "SHOPIFY_CLIENT_SECRET": "your-app-client-secret"
       }
     }
   }
@@ -38,11 +39,12 @@ A comprehensive [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 
 ### Clone & run locally
 
 ```bash
-git clone https://github.com/slackermafia/Shopify-MCP-Server.git
+git clone https://github.com/Nextboom-Inc/Shopify-MCP-Server.git
 cd Shopify-MCP-Server
 npm install
 SHOPIFY_STORE_DOMAIN=your-store.myshopify.com \
-SHOPIFY_ACCESS_TOKEN=shpat_xxxxxxxxxxxx \
+SHOPIFY_CLIENT_ID=your-app-client-id \
+SHOPIFY_CLIENT_SECRET=your-app-client-secret \
 node src/index.js
 ```
 
@@ -51,13 +53,24 @@ node src/index.js
 | Environment Variable    | Description                              |
 |------------------------|------------------------------------------|
 | `SHOPIFY_STORE_DOMAIN` | Your store domain, e.g. `store.myshopify.com` |
-| `SHOPIFY_ACCESS_TOKEN` | Shopify Admin API access token           |
+| `SHOPIFY_ACCESS_TOKEN` | Optional static Shopify Admin API token (legacy fallback) |
+| `SHOPIFY_CLIENT_ID`    | App client ID for token exchange         |
+| `SHOPIFY_CLIENT_SECRET`| App client secret for token exchange     |
 
-### Getting an Access Token
+### Authentication
+
+Preferred: provide `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET`. The server requests a fresh access token from:
+
+- `POST https://{SHOPIFY_STORE_DOMAIN}/admin/oauth/access_token`
+- Body: `grant_type=client_credentials`, `client_id`, `client_secret`
+
+Fallback: if `SHOPIFY_ACCESS_TOKEN` is set, the server will use it directly.
+
+### Getting app credentials and scopes
 
 1. Go to your Shopify Admin → **Settings → Apps and sales channels → Develop apps**
-2. Create a private app and grant it the Admin API scopes you need
-3. Copy the **Admin API access token**
+2. Create a private/custom app and grant it the Admin API scopes you need
+3. Copy the app's client ID and client secret
 
 **Recommended scopes:** `read_products`, `write_products`, `read_orders`, `write_orders`, `read_customers`, `write_customers`, `read_inventory`, `write_inventory`, `read_price_rules`, `write_price_rules`, `read_discounts`, `write_discounts`, `read_content`, `write_content`, `read_metaobjects`, `write_metaobjects`, `read_themes`, `write_themes`
 
