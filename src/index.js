@@ -2429,16 +2429,14 @@ const handlers = {
                 name
                 type
                 description
-                fieldDefinitions(first: 25) {
-                  edges {
-                    node {
-                      name
-                      key
-                      description
-                      type
-                      required
-                    }
+                fieldDefinitions {
+                  name
+                  key
+                  description
+                  type {
+                    name
                   }
+                  required
                 }
               }
             }
@@ -2464,16 +2462,14 @@ const handlers = {
               name
               type
               description
-              fieldDefinitions(first: 25) {
-                edges {
-                  node {
-                    name
-                    key
-                    description
-                    type
-                    required
-                  }
+              fieldDefinitions {
+                name
+                key
+                description
+                type {
+                  name
                 }
+                required
               }
             }
             userErrors {
