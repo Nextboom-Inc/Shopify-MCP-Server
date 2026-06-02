@@ -6,6 +6,7 @@ A comprehensive [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 
 
 - **Products** — list, create, update, delete, publish/unpublish, variants CRUD, images (URL and base64), metafields, category taxonomy
 - **Collections** — custom & smart collections, add products, list collection products
+- **Navigation menus** — list, get, create, update, and delete online store menus
 - **Orders** — list, get, create, update, cancel, close, fulfill, refund, transactions
 - **Draft Orders** — list, create, complete
 - **Customers** — list, search, get, create, update, delete, customer order history
@@ -72,9 +73,51 @@ Fallback: if `SHOPIFY_ACCESS_TOKEN` is set, the server will use it directly.
 2. Create a private/custom app and grant it the Admin API scopes you need
 3. Copy the app's client ID and client secret
 
-**Recommended scopes:** `read_products`, `write_products`, `read_orders`, `write_orders`, `read_customers`, `write_customers`, `read_inventory`, `write_inventory`, `read_price_rules`, `write_price_rules`, `read_discounts`, `write_discounts`, `read_content`, `write_content`, `read_metaobjects`, `write_metaobjects`, `read_themes`, `write_themes`
+### Admin API scopes
 
-## Available Tools (71)
+The MCP server can be run with only the scopes needed for the tools you plan to use. To enable every currently implemented tool, grant the app these Admin API scopes:
+
+```text
+read_products,write_products,
+read_inventory,write_inventory,read_locations,
+read_customers,write_customers,
+read_orders,write_orders,read_all_orders,
+read_draft_orders,write_draft_orders,
+read_price_rules,write_price_rules,
+read_discounts,write_discounts,
+read_metaobjects,write_metaobjects,
+read_metaobject_definitions,write_metaobject_definitions,
+read_publications,write_publications,
+read_themes,write_themes,
+read_fulfillments,write_fulfillments,
+read_online_store_navigation,write_online_store_navigation
+```
+
+Scope groups by tool area:
+
+| Tool area | Scopes |
+|-----------|--------|
+| Shop info | No dedicated scope beyond Admin API access |
+| Products, variants, product images, product metafields, product taxonomy | `read_products`, `write_products` |
+| Variant metafields | `write_products` |
+| Collections and collection membership | `read_products`, `write_products` |
+| Navigation menus | `read_online_store_navigation`, `write_online_store_navigation` |
+| Publications / sales channels | `read_publications`, `write_publications` |
+| Orders, refunds, transactions, customer order history | `read_orders`, `write_orders`; add `read_all_orders` if you need access beyond Shopify's normal recent-order window |
+| Fulfillments | `read_fulfillments`, `write_fulfillments` |
+| Draft orders | `read_draft_orders`, `write_draft_orders` |
+| Customers | `read_customers`, `write_customers` |
+| Inventory levels and inventory items | `read_inventory`, `write_inventory` |
+| Locations | `read_locations` |
+| Price rules | `read_price_rules`, `write_price_rules` |
+| Discount codes | `read_discounts`, `write_discounts` |
+| Metaobject entries | `read_metaobjects`, `write_metaobjects` |
+| Metaobject definitions | `read_metaobject_definitions`, `write_metaobject_definitions` |
+| Themes and theme assets | `read_themes`, `write_themes` |
+
+The server does not currently implement Shopify content/page/blog tools, so `read_content` and `write_content` are not required for the current tool set.
+
+## Available Tools (76)
 
 ### Shop
 | Tool | Description |
@@ -122,6 +165,15 @@ Fallback: if `SHOPIFY_ACCESS_TOKEN` is set, the server will use it directly.
 | `update_collection` | Update collection title, description, sort order |
 | `add_product_to_collection` | Add a product to a custom collection |
 | `list_collection_products` | List products in a collection |
+
+### Navigation Menus
+| Tool | Description |
+|------|-------------|
+| `list_menus` | List online store navigation menus |
+| `get_menu` | Get a navigation menu by ID |
+| `create_menu` | Create an online store navigation menu |
+| `update_menu` | Update an online store navigation menu |
+| `delete_menu` | Delete an online store navigation menu |
 
 ### Orders
 | Tool | Description |

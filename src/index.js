@@ -120,6 +120,12 @@ function err(message) {
   return { success: false, error: message };
 }
 
+function toGid(resource, id) {
+  return String(id).startsWith('gid://')
+    ? id
+    : `gid://shopify/${resource}/${id}`;
+}
+
 const tools = [
   {
     name: 'get_product',
@@ -529,6 +535,86 @@ const tools = [
         limit: { type: 'number', description: 'Max results' },
       },
       required: ['collection_id'],
+    },
+  },
+  {
+    name: 'list_menus',
+    description: 'List online store navigation menus',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max results' },
+        query: {
+          type: 'string',
+          description: 'Optional Shopify search query, e.g. "handle:main-menu"',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_menu',
+    description: 'Get a navigation menu by ID',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        menu_id: {
+          type: 'string',
+          description: 'The menu ID, numeric or gid://shopify/Menu/...',
+        },
+      },
+      required: ['menu_id'],
+    },
+  },
+  {
+    name: 'create_menu',
+    description: 'Create an online store navigation menu',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Menu title' },
+        handle: { type: 'string', description: 'Unique menu handle' },
+        items: {
+          type: 'array',
+          description: 'Menu items as MenuItemCreateInput objects',
+          items: { type: 'object' },
+        },
+      },
+      required: ['title', 'handle', 'items'],
+    },
+  },
+  {
+    name: 'update_menu',
+    description: 'Update an online store navigation menu',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        menu_id: {
+          type: 'string',
+          description: 'The menu ID, numeric or gid://shopify/Menu/...',
+        },
+        title: { type: 'string', description: 'Menu title' },
+        handle: { type: 'string', description: 'Unique menu handle' },
+        items: {
+          type: 'array',
+          description: 'Full menu item tree as MenuItemUpdateInput objects',
+          items: { type: 'object' },
+        },
+      },
+      required: ['menu_id', 'title', 'items'],
+    },
+  },
+  {
+    name: 'delete_menu',
+    description: 'Delete an online store navigation menu',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        menu_id: {
+          type: 'string',
+          description: 'The menu ID, numeric or gid://shopify/Menu/...',
+        },
+      },
+      required: ['menu_id'],
     },
   },
   {
@@ -1945,6 +2031,177 @@ const handlers = {
       if (args.limit) params.push(`limit=${args.limit}`);
       const data = await shopifyREST(`/products.json?${params.join('&')}`);
       return ok(data.products || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  list_menus: async (args) => {
+    try {
+      const query = `
+        query ListMenus($first: Int!, $query: String) {
+          menus(first: $first, query: $query) {
+            nodes {
+              id
+              handle
+              title
+              isDefault
+              items {
+                id
+                title
+                type
+                url
+                resourceId
+                tags
+                items {
+                  id
+                  title
+                  type
+                  url
+                  resourceId
+                  tags
+                }
+              }
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query, {
+        first: args.limit || 20,
+        query: args.query || null,
+      });
+      return ok(result.menus.nodes || []);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  get_menu: async (args) => {
+    try {
+      const query = `
+        query GetMenu($id: ID!) {
+          menu(id: $id) {
+            id
+            handle
+            title
+            isDefault
+            items {
+              id
+              title
+              type
+              url
+              resourceId
+              tags
+              items {
+                id
+                title
+                type
+                url
+                resourceId
+                tags
+              }
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(query, {
+        id: toGid('Menu', args.menu_id),
+      });
+      return ok(result.menu);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  create_menu: async (args) => {
+    try {
+      const mutation = `
+        mutation CreateMenu($title: String!, $handle: String!, $items: [MenuItemCreateInput!]!) {
+          menuCreate(title: $title, handle: $handle, items: $items) {
+            menu {
+              id
+              handle
+              title
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        title: args.title,
+        handle: args.handle,
+        items: args.items,
+      });
+      if (result.menuCreate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.menuCreate.userErrors)}`
+        );
+      }
+      return ok(result.menuCreate.menu);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  update_menu: async (args) => {
+    try {
+      const mutation = `
+        mutation UpdateMenu($id: ID!, $title: String!, $handle: String, $items: [MenuItemUpdateInput!]!) {
+          menuUpdate(id: $id, title: $title, handle: $handle, items: $items) {
+            menu {
+              id
+              handle
+              title
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        id: toGid('Menu', args.menu_id),
+        title: args.title,
+        handle: args.handle || null,
+        items: args.items,
+      });
+      if (result.menuUpdate?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.menuUpdate.userErrors)}`
+        );
+      }
+      return ok(result.menuUpdate.menu);
+    } catch (error) {
+      return err(error.message);
+    }
+  },
+
+  delete_menu: async (args) => {
+    try {
+      const mutation = `
+        mutation DeleteMenu($id: ID!) {
+          menuDelete(id: $id) {
+            deletedMenuId
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      const result = await shopifyGQL(mutation, {
+        id: toGid('Menu', args.menu_id),
+      });
+      if (result.menuDelete?.userErrors?.length) {
+        throw new Error(
+          `GraphQL errors: ${JSON.stringify(result.menuDelete.userErrors)}`
+        );
+      }
+      return ok({ deletedMenuId: result.menuDelete.deletedMenuId });
     } catch (error) {
       return err(error.message);
     }
