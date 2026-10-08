@@ -16,18 +16,22 @@ const method = () => ({ id: methodId, name: 'Standard', description: '3–5 days
 const zone = () => ({ id: zoneId, name: 'Domestic', countries: [{ name: 'United States', code: { countryCode: 'US', restOfWorld: false }, provinces: [{ id: gid('DeliveryProvince', 7), name: 'Colorado', code: 'CO' }] }] });
 const pageInfo = (hasNextPage = false, endCursor = null) => ({ hasNextPage, endCursor });
 function fixture() {
-  const state = { methods: [method()], mutations: [], calls: [] };
+  const state = { methods: [method()], zone: zone(), mutations: [], calls: [] };
   const gql = async (query, variables) => {
     state.calls.push({ query, variables });
     if (query.includes('query ShippingProfiles')) return { deliveryProfiles: { nodes: [{ id: profileId, name: 'General', default: true }], pageInfo: pageInfo() } };
     if (query.includes('query ShippingProfile(')) return { deliveryProfile: { id: profileId, name: 'General', default: true, profileLocationGroups: [{ locationGroup: { id: groupId } }] } };
-    if (query.includes('query ShippingLocations')) return { deliveryProfile: { profileLocationGroups: [{ locationGroup: { id: groupId, locations: { nodes: [{ id: gid('Location', 8), name: 'Warehouse' }], pageInfo: pageInfo() } } }] } };
+    if (query.includes('query ShippingLocations')) return { deliveryProfile: { profileLocationGroups: [{ locationGroup: { id: groupId, locations: { nodes: [{ id: gid('Location', 8), ...(variables.includeLocationNames ? { name: 'Warehouse' } : {}) }], pageInfo: pageInfo() } } }] } };
     if (query.includes('query ShippingZones')) return { deliveryProfile: { profileLocationGroups: [{ locationGroup: { id: groupId }, locationGroupZones: {
-      edges: [{ cursor: 'zone-1', node: { zone: zone(), methodDefinitions: { nodes: structuredClone(state.methods), pageInfo: pageInfo() } } }], pageInfo: pageInfo(),
+      edges: [{ cursor: 'zone-1', node: { zone: structuredClone(state.zone), methodDefinitions: { nodes: structuredClone(state.methods), pageInfo: pageInfo() } } }], pageInfo: pageInfo(),
     } }] } };
     if (query.includes('mutation UpdateShippingRate')) {
       state.mutations.push(variables);
       const update = variables.profile.locationGroupsToUpdate[0].zonesToUpdate[0];
+      if (update.countries) {
+        state.zone.countries = update.countries.map(country => ({ name: 'United States', code: { countryCode: country.code, restOfWorld: false }, provinces: state.zone.countries[0].provinces.filter(item => country.provinces.some(p => p.code === item.code)) }));
+        return { deliveryProfileUpdate: { profile: { id: profileId, name: 'General' }, userErrors: [] } };
+      }
       const input = update.methodDefinitionsToUpdate?.[0] || update.methodDefinitionsToCreate[0];
       const target = update.methodDefinitionsToUpdate ? state.methods.find(item => item.id === input.id) : { ...method(), id: gid('DeliveryMethodDefinition', 9), methodConditions: [] };
       if (!update.methodDefinitionsToUpdate) state.methods.push(target);
@@ -63,7 +67,8 @@ test('complete profile includes locations, destination regions, prices and condi
   const { handlers } = fixture();
   const result = await handlers.get_shipping_profile({ profile_id: profileId });
   const group = result.data.profileLocationGroups[0];
-  assert.equal(group.locationGroup.locations[0].name, 'Warehouse');
+  assert.equal(group.locationGroup.locations[0].id, gid('Location', 8));
+  assert.equal(group.locationGroup.locations[0].name, undefined);
   assert.deepEqual(group.zones[0].methodDefinitions, [method()]);
   assert.match(group.zones[0].fingerprint, /^[a-f0-9]{64}$/);
 });
@@ -253,6 +258,90 @@ test('readback detects changes to omitted fields and unrelated settings', async 
       return result;
     });
     const result = await failing.update_shipping_rate(args);
+    assert.equal(result.success, false);
+    assert.equal(result.mutation_applied, true);
+  }
+});
+
+
+test('default profile reads omit restricted location names; names remain opt-in', async () => {
+  const { gql, handlers, state } = fixture();
+  const defaultResult = await handlers.get_shipping_profile({ profile_id: profileId });
+  assert.equal(defaultResult.success, true);
+  assert.equal(state.calls.find(call => call.query.includes('ShippingLocations')).variables.includeLocationNames, false);
+  const namedResult = await handlers.get_shipping_profile({ profile_id: profileId, include_location_names: true });
+  assert.equal(namedResult.data.profileLocationGroups[0].locationGroup.locations[0].name, 'Warehouse');
+  const limited = createShippingHandlers(async (query, variables) => {
+    if (query.includes('ShippingLocations') && variables.includeLocationNames) throw new Error('Access denied for name field');
+    return gql(query, variables);
+  });
+  assert.equal((await limited.get_shipping_profile({ profile_id: profileId })).success, true);
+  assert.equal((await limited.get_shipping_profile({ profile_id: profileId, include_location_names: true })).success, false);
+});
+
+
+test('price conditions preserve Shopify GIDs with operator query suffixes', async () => {
+  const { handlers, state } = fixture();
+  const exactId = conditionId + '?operator=less_than_or_equal_to';
+  state.methods[0].methodConditions[0].id = exactId;
+  const result = await handlers.update_shipping_rate({ ...await target(handlers), method_id: methodId,
+    conditions_to_update: [{ id: exactId, operator: 'LESS_THAN_OR_EQUAL_TO', criteria: 49.99, criteriaUnit: 'USD' }],
+  });
+  assert.equal(result.success, true);
+  const input = state.mutations[0].profile.locationGroupsToUpdate[0].zonesToUpdate[0].methodDefinitionsToUpdate[0];
+  assert.equal(input.conditionsToUpdate[0].id, exactId);
+});
+
+
+test('condition readback accepts reassigned IDs but detects a changed untouched bound', async () => {
+  for (const changedOther of [false, true]) {
+    const { gql, handlers, state } = fixture();
+    state.methods[0].methodConditions.push({ ...structuredClone(method().methodConditions[0]), id: gid('DeliveryCondition', 20), operator: 'GREATER_THAN_OR_EQUAL_TO', conditionCriteria: { __typename: 'MoneyV2', ...money('0') } });
+    const args = { ...await target(handlers), method_id: methodId, conditions_to_update: [{ id: conditionId, operator: 'LESS_THAN_OR_EQUAL_TO', criteria: 39.99, criteriaUnit: 'USD' }] };
+    const reassigned = createShippingHandlers(async (query, vars) => {
+      const result = await gql(query, vars);
+      if (query.includes('mutation')) {
+        state.methods[0].methodConditions[0].id = gid('DeliveryCondition', 21);
+        state.methods[0].methodConditions[1].id = gid('DeliveryCondition', 22);
+        if (changedOther) state.methods[0].methodConditions[1].conditionCriteria.amount = '10';
+      }
+      return result;
+    });
+    const result = await reassigned.update_shipping_rate(args);
+    assert.equal(result.success, !changedOther);
+    if (changedOther) assert.equal(result.mutation_applied, true);
+  }
+});
+
+test('zone restriction removes selected provinces and preserves rates', async () => {
+  const { handlers, state } = fixture();
+  state.zone.countries[0].provinces.push({ id: gid('DeliveryProvince', 30), name: 'Alaska', code: 'AK' });
+  const result = await handlers.restrict_shipping_zone({ ...await target(handlers), country_code: 'US', province_codes: ['CO'] });
+  assert.equal(result.success, true);
+  assert.deepEqual(result.data.after.zone.countries[0].provinces.map(item => item.code), ['CO']);
+  assert.deepEqual(result.data.after.methodDefinitions, [method()]);
+  assert.deepEqual(state.mutations[0].profile.locationGroupsToUpdate[0].zonesToUpdate[0], { id: zoneId, countries: [{ code: 'US', includeAllProvinces: false, provinces: [{ code: 'CO' }] }] });
+});
+
+test('zone restriction rejects stale, foreign, empty, duplicate and added destinations', async () => {
+  const { handlers, state } = fixture();
+  const args = { ...await target(handlers), country_code: 'US', province_codes: ['CO'] };
+  for (const override of [{ expected_zone_fingerprint: '0'.repeat(64) }, { zone_id: gid('DeliveryZone', 999) }, { country_code: 'CA' }, { province_codes: [] }, { province_codes: ['CO', 'CO'] }, { province_codes: ['NY'] }]) {
+    assert.equal((await handlers.restrict_shipping_zone({ ...args, ...override })).success, false);
+  }
+  assert.equal(state.mutations.length, 0);
+});
+
+test('zone restriction readback detects incorrect destinations and changed rates', async () => {
+  for (const alter of [state => { state.zone.countries[0].provinces = []; }, state => { state.methods[0].rateProvider.price.amount = '99'; }]) {
+    const { handlers, gql, state } = fixture();
+    const args = { ...await target(handlers), country_code: 'US', province_codes: ['CO'] };
+    const failing = createShippingHandlers(async (query, vars) => {
+      const result = await gql(query, vars);
+      if (query.includes('mutation')) alter(state);
+      return result;
+    });
+    const result = await failing.restrict_shipping_zone(args);
     assert.equal(result.success, false);
     assert.equal(result.mutation_applied, true);
   }

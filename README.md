@@ -107,7 +107,7 @@ Scope groups by tool area:
 
 | Tool area | Scopes |
 |-----------|--------|
-| Shipping profiles and rates | `read_shipping`, `write_shipping`; profile location reads also need `read_locations` |
+| Shipping profiles and rates | `read_shipping`, `write_shipping`; optional location names need `read_locations` or `read_markets_home` |
 | Shop info | No dedicated scope beyond Admin API access |
 | Products, variants, product images, product metafields, product taxonomy | `read_products`, `write_products` |
 | Variant metafields | `write_products` |
@@ -143,13 +143,18 @@ The server does not currently implement blog or article tools. Page tools use Ad
 | Tool | Description |
 |------|-------------|
 | `list_shipping_profiles` | List profile IDs, names, and default status; use `pageInfo.endCursor` as `after` while `hasNextPage` is true |
-| `get_shipping_profile` | Read all location groups, locations, destination countries/provinces, fixed and calculated rates, and condition IDs; follows every nested connection |
+| `get_shipping_profile` | Read all location groups, location IDs, destination countries/provinces, fixed and calculated rates, and condition IDs; follows every nested connection |
 | `create_shipping_rate` | Add one fixed rate with optional minimum/maximum price conditions to an existing zone |
 | `update_shipping_rate` | Change one fixed rate's price, name, description, active status, or selected existing price conditions |
+| `restrict_shipping_zone` | Retain selected existing provinces in one single-country zone; preserve rates and other shipping settings |
+
+Location names are omitted by default so profile inspection and rate updates do not require extra location-name permissions. Set `include_location_names: true` on `get_shipping_profile` when the app has `read_locations` or `read_markets_home`.
 
 Before a write, read and save a recovery snapshot with `get_shipping_profile`. Pass the exact profile, location-group and zone GIDs, plus that zone's `fingerprint` as `expected_zone_fingerprint`. The tool re-reads the profile and rejects a changed snapshot or a rate/condition that belongs to another zone. This is a preflight check, not an atomic Shopify compare-and-swap; concurrent Admin changes can still occur between requests.
 
-Prices use `{ "amount": "5.95", "currencyCode": "USD" }`. New price conditions use `price_conditions_to_create` with `operator` (`GREATER_THAN_OR_EQUAL_TO` or `LESS_THAN_OR_EQUAL_TO`) and `criteria` (a money object). Existing conditions use `conditions_to_update` with the condition GID, `operator`, numeric `criteria`, and currency `criteriaUnit`. Omitted rate fields and conditions remain unchanged. Conditions cannot be removed with these tools, and calculated rates cannot be converted to fixed rates. Destination zones, product assignments and fulfillment locations cannot be edited with these tools.
+Prices use `{ "amount": "5.95", "currencyCode": "USD" }`. New price conditions use `price_conditions_to_create` with `operator` (`GREATER_THAN_OR_EQUAL_TO` or `LESS_THAN_OR_EQUAL_TO`) and `criteria` (a money object). Existing conditions use `conditions_to_update` with the condition GID, `operator`, numeric `criteria`, and currency `criteriaUnit`. Omitted rate fields and conditions remain unchanged. Conditions cannot be removed with these tools, and calculated rates cannot be converted to fixed rates. Product assignments and fulfillment locations cannot be edited with these tools.
+
+Shipping zone restrictions: `restrict_shipping_zone` retains a nonempty list of existing province codes in one existing single-country zone. It cannot add destinations. Read and save the complete profile, then supply its fresh zone fingerprint. The tool verifies the saved destination set and preserves rates, other zones, and fulfillment locations. Shopify may assign new condition IDs after a rate update; verification compares complete condition values.
 
 Successful writes return the target zone before and after the change and the persisted rate. Readback also checks the requested values and preservation of other returned shipping settings. If `mutation_applied` is `true`, Shopify accepted the write but readback failed or did not match. If `mutation_status` is `unknown`, the write request did not return a result. In either case, read the profile before retrying; do not blindly retry rate creation.
 

@@ -24,13 +24,18 @@ const TARGET_PROPERTIES = {
   expected_zone_fingerprint: { type: 'string', pattern: '^[a-f0-9]{64}$', description: 'Fingerprint from a fresh get_shipping_profile result. Back up that result before writing.' },
 };
 export const shippingTools = [
+  { name: 'restrict_shipping_zone', description: 'Restrict an existing single-country zone to selected existing provinces. Cannot add destinations or change rates. Requires a fresh zone fingerprint and write_shipping. Read and back up the profile first.',
+    inputSchema: { type: 'object', additionalProperties: false, properties: { ...TARGET_PROPERTIES,
+      country_code: { type: 'string', pattern: '^[A-Z]{2}$' },
+      province_codes: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1 } },
+    }, required: [...Object.keys(TARGET_PROPERTIES), 'country_code', 'province_codes'] } },
   { name: 'list_shipping_profiles', description: 'List shipping profile summaries with cursor pagination. Requires read_shipping.',
     inputSchema: { type: 'object', additionalProperties: false, properties: {
       limit: { type: 'integer', minimum: 1, maximum: 250 }, after: { type: 'string' },
       merchant_owned_only: { type: 'boolean' },
     } } },
   { name: 'get_shipping_profile', description: 'Read a complete shipping profile, including all locations, zones, fixed and calculated rates, conditions, and zone fingerprints. Follows nested pagination. Requires read_shipping.',
-    inputSchema: { type: 'object', additionalProperties: false, properties: { profile_id: { type: 'string' } }, required: ['profile_id'] } },
+    inputSchema: { type: 'object', additionalProperties: false, properties: { profile_id: { type: 'string' }, include_location_names: { type: 'boolean', description: 'Include location names; requires read_locations or read_markets_home. Default false.' } }, required: ['profile_id'] } },
   { name: 'create_shipping_rate', description: 'Add one fixed shipping rate to an existing zone. Requires a fresh zone fingerprint and write_shipping. Does not change zones, products, locations, or existing rates. Read and back up the profile first.',
     inputSchema: { type: 'object', additionalProperties: false, properties: { ...TARGET_PROPERTIES, ...RATE_PROPERTIES }, required: [...Object.keys(TARGET_PROPERTIES), 'name', 'price'] } },
   { name: 'update_shipping_rate', description: 'Update one existing fixed shipping rate and selected price conditions. Requires a fresh zone fingerprint and write_shipping. Preserves omitted fields. Does not replace calculated rates or remove conditions. Read and back up the profile first.',
@@ -58,9 +63,9 @@ export const shippingQueries = {
   profile: `query ShippingProfile($id: ID!) {
     deliveryProfile(id: $id) { id name default profileLocationGroups { locationGroup { id } } }
   }`,
-  locations: `query ShippingLocations($id: ID!, $group: ID!, $after: String) {
+  locations: `query ShippingLocations($id: ID!, $group: ID!, $after: String, $includeLocationNames: Boolean!) {
     deliveryProfile(id: $id) { profileLocationGroups(locationGroupId: $group) {
-      locationGroup { id locations(first: 50, after: $after) { nodes { id name } ${PAGE_INFO} } }
+      locationGroup { id locations(first: 50, after: $after) { nodes { id name @include(if: $includeLocationNames) } ${PAGE_INFO} } }
     } }
   }`,
   zones: `query ShippingZones($id: ID!, $group: ID!, $first: Int!, $after: String, $methodsAfter: String) {
@@ -102,7 +107,8 @@ function validate(value, schema, path = 'arguments') {
   }
 }
 function gid(value, type) {
-  if (typeof value !== 'string' || !new RegExp(`^gid://shopify/${type}/[0-9]+$`).test(value)) throw new Error(`Expected a ${type} GID`);
+  const suffix = type === 'DeliveryCondition' ? '(?:\\?operator=[a-z_]+)?' : '';
+  if (typeof value !== 'string' || !new RegExp(`^gid://shopify/${type}/[0-9]+${suffix}$`).test(value)) throw new Error(`Expected a ${type} GID`);
   return value;
 }
 function canonical(value) {
@@ -126,13 +132,16 @@ function groupFrom(result, groupId) {
   if (!group) throw new Error('Shipping location group was not found');
   return group;
 }
+function normalizedAmount(value) {
+  const [whole, fraction = ''] = String(value).split('.');
+  return `${whole.replace(/^0+(?=\d)/, '')}.${fraction.replace(/0+$/, '')}`;
+}
 function amountEqual(left, right) {
-  const normalize = value => { const [whole, fraction = ''] = String(value).split('.'); return `${whole.replace(/^0+(?=\d)/, '')}.${fraction.replace(/0+$/, '')}`; };
-  return normalize(left) === normalize(right);
+  return normalizedAmount(left) === normalizedAmount(right);
 }
 
 export function createShippingHandlers(shopifyGQL) {
-  async function readProfile(profileId) {
+  async function readProfile(profileId, includeLocationNames = false) {
     gid(profileId, 'DeliveryProfile');
     const initial = await shopifyGQL(shippingQueries.profile, { id: profileId });
     if (!initial.deliveryProfile) throw new Error('Shipping profile was not found');
@@ -143,7 +152,7 @@ export function createShippingHandlers(shopifyGQL) {
       let after = null;
       const locationCursors = new Set();
       do {
-        const result = await shopifyGQL(shippingQueries.locations, { id: profileId, group: groupId, after });
+        const result = await shopifyGQL(shippingQueries.locations, { id: profileId, group: groupId, after, includeLocationNames });
         const connection = groupFrom(result, groupId).locationGroup.locations;
         group.locationGroup.locations.push(...connection.nodes);
         after = nextCursor(connection, locationCursors);
@@ -242,32 +251,76 @@ export function createShippingHandlers(shopifyGQL) {
         for (const key of ['name', 'description', 'active', 'rateProvider']) {
           if ((key === 'rateProvider' ? !args.price : !Object.hasOwn(args, key)) && JSON.stringify(canonical(current[key])) !== JSON.stringify(canonical(persisted[key]))) throw new Error(`An omitted rate field changed: ${key}`);
         }
-        const changedConditions = new Set((args.conditions_to_update || []).map(item => item.id));
-        for (const condition of current.methodConditions) {
-          if (!changedConditions.has(condition.id) && JSON.stringify(canonical(condition)) !== JSON.stringify(canonical(persisted.methodConditions.find(item => item.id === condition.id)))) throw new Error('An unrelated rate condition changed');
-        }
       }
       for (const key of ['name', 'description', 'active']) if (Object.hasOwn(args, key) && persisted[key] !== args[key]) throw new Error(`Persisted rate ${key} does not match input`);
       if (args.price && (persisted.rateProvider.__typename !== 'DeliveryRateDefinition' || persisted.rateProvider.price.currencyCode !== args.price.currencyCode || !amountEqual(persisted.rateProvider.price.amount, args.price.amount))) throw new Error('Persisted shipping price does not match input');
+      // Shopify can assign new condition IDs when it updates a bound.
+      // Verify the complete condition values, including every unchanged bound.
+      const expectedConditions = structuredClone(current?.methodConditions || []);
       for (const update of args.conditions_to_update || []) {
-        const condition = persisted.methodConditions.find(item => item.id === update.id);
-        if (!condition || condition.operator !== update.operator || condition.conditionCriteria.currencyCode !== update.criteriaUnit || !amountEqual(condition.conditionCriteria.amount, update.criteria)) throw new Error('Persisted price condition does not match input');
+        const condition = expectedConditions.find(item => item.id === update.id);
+        condition.operator = update.operator;
+        condition.conditionCriteria = { __typename: 'MoneyV2', amount: String(update.criteria), currencyCode: update.criteriaUnit };
       }
-      for (const condition of args.price_conditions_to_create || []) {
-        const oldIds = new Set(current?.methodConditions.map(item => item.id) || []);
-        if (!persisted.methodConditions.some(item => !oldIds.has(item.id) && item.field === 'TOTAL_PRICE' && item.operator === condition.operator && item.conditionCriteria.currencyCode === condition.criteria.currencyCode && amountEqual(item.conditionCriteria.amount, condition.criteria.amount))) throw new Error('Persisted new price condition does not match input');
-      }
+      for (const condition of args.price_conditions_to_create || []) expectedConditions.push({
+        field: 'TOTAL_PRICE', operator: condition.operator,
+        conditionCriteria: { __typename: 'MoneyV2', ...condition.criteria },
+      });
+      const conditionValues = conditions => conditions.map(({ id, ...condition }) => {
+        const value = structuredClone(condition);
+        if (value.conditionCriteria.__typename === 'MoneyV2') value.conditionCriteria.amount = normalizedAmount(value.conditionCriteria.amount);
+        return JSON.stringify(canonical(value));
+      }).sort();
+      if (JSON.stringify(conditionValues(expectedConditions)) !== JSON.stringify(conditionValues(persisted.methodConditions))) throw new Error('Persisted price conditions do not match input or unchanged conditions');
       return { success: true, data: { before: entry, after: saved, method: persisted } };
     } catch (error) {
       return { success: false, mutation_applied: true, error: `Shipping update was accepted, but readback failed: ${error.message}. Read the profile before retrying.` };
     }
   }
+  async function restrictZone(args) {
+    gid(args.profile_id, 'DeliveryProfile');
+    gid(args.location_group_id, 'DeliveryLocationGroup');
+    gid(args.zone_id, 'DeliveryZone');
+    if (!args.province_codes.length || new Set(args.province_codes).size !== args.province_codes.length) throw new Error('Select one or more unique province codes');
+    const before = await readProfile(args.profile_id);
+    const entry = targetZone(before, args);
+    if (entry.fingerprint !== args.expected_zone_fingerprint) throw new Error('Shipping zone changed since the snapshot; read and back up the profile again');
+    const country = entry.zone.countries[0];
+    if (entry.zone.countries.length !== 1 || country.code.restOfWorld || country.code.countryCode !== args.country_code) throw new Error('Restriction requires an existing single-country zone matching the country code');
+    const existing = new Set(country.provinces.map(item => item.code));
+    if (args.province_codes.some(code => !existing.has(code))) throw new Error('Cannot add destinations with a restriction');
+    const profile = { locationGroupsToUpdate: [{ id: args.location_group_id, zonesToUpdate: [{ id: args.zone_id,
+      countries: [{ code: args.country_code, includeAllProvinces: false, provinces: args.province_codes.map(code => ({ code })) }],
+    }] }] };
+    let result;
+    try { result = await shopifyGQL(shippingQueries.update, { id: args.profile_id, profile }); }
+    catch (error) { return { success: false, mutation_status: 'unknown', error: `Shipping restriction did not return a result: ${error.message}. Read the profile before retrying.` }; }
+    const payload = result.deliveryProfileUpdate;
+    if (payload?.userErrors?.length) throw new Error(JSON.stringify(payload.userErrors));
+    if (!payload?.profile) throw new Error('Shopify returned no updated shipping profile');
+    try {
+      const after = await readProfile(args.profile_id);
+      const saved = targetZone(after, args);
+      if (saved.zone.countries.length !== 1 || saved.zone.countries[0].code.countryCode !== args.country_code || saved.zone.countries[0].code.restOfWorld) throw new Error('Persisted country does not match input');
+      if (JSON.stringify(saved.zone.countries[0].provinces.map(item => item.code).sort()) !== JSON.stringify([...args.province_codes].sort())) throw new Error('Persisted provinces do not match input');
+      const withoutDestinations = source => {
+        const copy = structuredClone(source);
+        const target = targetZone(copy, args);
+        delete target.fingerprint;
+        delete target.zone.countries;
+        return JSON.stringify(canonical(copy));
+      };
+      if (withoutDestinations(before) !== withoutDestinations(after)) throw new Error('Other shipping settings changed during the restriction');
+      return { success: true, data: { before: entry, after: saved } };
+    } catch (error) { return { success: false, mutation_applied: true, error: `Shipping restriction was accepted, but readback failed: ${error.message}. Read the profile before retrying.` }; }
+  }
   const implementations = {
+    restrict_shipping_zone: args => restrictZone(args),
     list_shipping_profiles: async args => {
       const result = await shopifyGQL(shippingQueries.list, { first: args.limit ?? 50, after: args.after ?? null, merchantOwnedOnly: args.merchant_owned_only ?? false });
       return { success: true, data: result.deliveryProfiles };
     },
-    get_shipping_profile: async args => ({ success: true, data: await readProfile(args.profile_id) }),
+    get_shipping_profile: async args => ({ success: true, data: await readProfile(args.profile_id, args.include_location_names ?? false) }),
     create_shipping_rate: args => writeRate(args, true),
     update_shipping_rate: args => writeRate(args, false),
   };
