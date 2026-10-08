@@ -18,6 +18,7 @@ A comprehensive [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 
 - **Pages** — list, get, create, update, delete pages, including template suffix assignment
 - **Discounts** — price rules and discount codes (list, create, delete)
 - **Publishing** — list sales channels, publish/unpublish products to channels
+- **Shipping** — paginated profile inspection; add or update fixed rates and price conditions in existing zones, with snapshot checks and persisted readback
 - **Themes** — list, create, update, delete themes; list, read, write, delete theme files (assets)
 
 ## Installation
@@ -98,13 +99,15 @@ read_fulfillments,write_fulfillments,
 read_content,write_content,
 read_online_store_pages,write_online_store_pages,
 read_online_store_navigation,write_online_store_navigation,
-read_files,write_files
+read_files,write_files,
+read_shipping,write_shipping
 ```
 
 Scope groups by tool area:
 
 | Tool area | Scopes |
 |-----------|--------|
+| Shipping profiles and rates | `read_shipping`, `write_shipping`; profile location reads also need `read_locations` |
 | Shop info | No dedicated scope beyond Admin API access |
 | Products, variants, product images, product metafields, product taxonomy | `read_products`, `write_products` |
 | Variant metafields | `write_products` |
@@ -128,12 +131,31 @@ Scope groups by tool area:
 
 The server does not currently implement blog or article tools. Page tools use Admin GraphQL's Page API and support `templateSuffix` for assigning page templates.
 
-## Available Tools (89)
+## Available Tools
 
 ### Shop
 | Tool | Description |
 |------|-------------|
 | `get_shop_info` | Get store name, domain, currency, plan info |
+
+### Shipping (GraphQL)
+
+| Tool | Description |
+|------|-------------|
+| `list_shipping_profiles` | List profile IDs, names, and default status; use `pageInfo.endCursor` as `after` while `hasNextPage` is true |
+| `get_shipping_profile` | Read all location groups, locations, destination countries/provinces, fixed and calculated rates, and condition IDs; follows every nested connection |
+| `create_shipping_rate` | Add one fixed rate with optional minimum/maximum price conditions to an existing zone |
+| `update_shipping_rate` | Change one fixed rate's price, name, description, active status, or selected existing price conditions |
+
+Before a write, read and save a recovery snapshot with `get_shipping_profile`. Pass the exact profile, location-group and zone GIDs, plus that zone's `fingerprint` as `expected_zone_fingerprint`. The tool re-reads the profile and rejects a changed snapshot or a rate/condition that belongs to another zone. This is a preflight check, not an atomic Shopify compare-and-swap; concurrent Admin changes can still occur between requests.
+
+Prices use `{ "amount": "5.95", "currencyCode": "USD" }`. New price conditions use `price_conditions_to_create` with `operator` (`GREATER_THAN_OR_EQUAL_TO` or `LESS_THAN_OR_EQUAL_TO`) and `criteria` (a money object). Existing conditions use `conditions_to_update` with the condition GID, `operator`, numeric `criteria`, and currency `criteriaUnit`. Omitted rate fields and conditions remain unchanged. Conditions cannot be removed with these tools, and calculated rates cannot be converted to fixed rates. Destination zones, product assignments and fulfillment locations cannot be edited with these tools.
+
+Successful writes return the target zone before and after the change and the persisted rate. Readback also checks the requested values and preservation of other returned shipping settings. If `mutation_applied` is `true`, Shopify accepted the write but readback failed or did not match. If `mutation_status` is `unknown`, the write request did not return a result. In either case, read the profile before retrying; do not blindly retry rate creation.
+
+The server uses Admin API `2026-01`. After installing these tools, reconnect your MCP client (restart Codex when required) to refresh its tool catalog. Grant shipping scopes to the installed app if Shopify returns an access-denied response; this code change does not grant app permissions.
+
+API references: [deliveryProfiles](https://shopify.dev/docs/api/admin-graphql/2026-01/queries/deliveryProfiles), [deliveryProfileUpdate](https://shopify.dev/docs/api/admin-graphql/2026-01/mutations/deliveryProfileUpdate), and [DeliveryMethodDefinitionInput](https://shopify.dev/docs/api/admin-graphql/2026-01/input-objects/DeliveryMethodDefinitionInput).
 
 ### Products
 | Tool | Description |

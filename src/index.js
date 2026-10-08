@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { shippingTools, createShippingHandlers } from './shipping.js';
+
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -149,6 +151,7 @@ const FILE_FIELDS = `
 `;
 
 const tools = [
+  ...shippingTools,
   {
     name: 'get_product',
     description: 'Fetch a single product by ID',
@@ -1901,6 +1904,7 @@ const tools = [
 
 // ─── Tool Handlers ────────────────────────────────────────────────────────────
 const handlers = {
+  ...createShippingHandlers(shopifyGQL),
   get_product: async (args) => {
     try {
       const product = await shopifyREST(`/products/${args.product_id}.json`);
